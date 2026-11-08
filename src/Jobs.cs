@@ -33,8 +33,8 @@ public class Jobs(BlobServiceClient blobs, QueueServiceClient queues)
         await queues.GetQueueClient(Names.StartQueue)
             .SendMessageAsync(JsonSerializer.Serialize(new StartMessage(jobId)));
 
-        // Container Apps ingress terminates TLS, so trust X-Forwarded-Proto for the scheme.
-        var scheme = req.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? req.Scheme;
+        // Container Apps can pass the request to the worker over HTTP after terminating TLS.
+        var scheme = Environment.GetEnvironmentVariable("PUBLIC_URL_SCHEME") ?? req.Scheme;
         var statusUrl = $"{scheme}://{req.Host}/api/jobs/{jobId}";
         return new AcceptedResult(statusUrl, new { jobId, statusUrl });
     }

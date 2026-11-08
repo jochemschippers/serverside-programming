@@ -119,6 +119,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         { name: 'AzureWebJobsStorage', value: storageConnection }
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'dotnet-isolated' }
+        { name: 'PUBLIC_URL_SCHEME', value: 'https' }
         { name: 'DOCKER_REGISTRY_SERVER_URL', value: acr.properties.loginServer }
         { name: 'DOCKER_REGISTRY_SERVER_USERNAME', value: acr.listCredentials().username }
         { name: 'DOCKER_REGISTRY_SERVER_PASSWORD', value: acr.listCredentials().passwords[0].value }
