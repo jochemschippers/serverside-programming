@@ -1,0 +1,11 @@
+﻿# build output
+bin/
+obj/
+src/publish/
+*.user
+.vs/
+.vscode/
+.idea/
+
+# local secrets
+local.settings.json

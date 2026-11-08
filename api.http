@@ -1,0 +1,23 @@
+### Weather Images API
+# Works with the VS Code "REST Client" extension and Visual Studio / Rider .http support.
+# Flow: POST /api/jobs -> poll GET /api/jobs/{id} until status = "completed" -> open the image links.
+
+@baseUrl = https://weather-func-bqurxt3tu2lka.kindhill-bfd226d6.italynorth.azurecontainerapps.io
+# Local: func start in ./src
+# @baseUrl = http://localhost:7071
+
+### Health check
+GET {{baseUrl}}/api/Ping
+
+### Start a new image job -> 202 Accepted { jobId, statusUrl }
+# @name startJob
+POST {{baseUrl}}/api/jobs
+
+### Job status: "queued" -> "processing" (imagesCompleted/stationCount) -> "completed" with public blob links in "images"
+GET {{baseUrl}}/api/jobs/{{startJob.response.body.jobId}}
+
+### Fetch one generated image (copy a link from "images" above), e.g.
+# GET https://<storage-account>.blob.core.windows.net/images/<jobId>/<stationId>.jpg
+
+### Unknown job id -> 404
+GET {{baseUrl}}/api/jobs/00000000000000000000000000000000
