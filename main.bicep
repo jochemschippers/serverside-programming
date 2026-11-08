@@ -8,6 +8,10 @@ param existingEnvironmentId string = ''
 @description('Container image for the function app. deploy.ps1 swaps in the real image after the first deploy.')
 param image string = 'mcr.microsoft.com/azure-functions/dotnet8-quickstart-demo:1.0'
 
+@secure()
+@description('Key callers send in the x-api-key header. deploy.ps1 generates it once and reuses it.')
+param apiKey string
+
 var suffix = uniqueString(resourceGroup().id)
 var startQueueName = 'start-jobs'
 var imageQueueName = 'image-jobs'
@@ -21,7 +25,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   sku: { name: 'Standard_LRS' }
   kind: 'StorageV2'
   properties: {
-    allowBlobPublicAccess: true // images are served straight from blob
+    allowBlobPublicAccess: false // images are read through SAS links from GET /api/jobs/{id}
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
   }
@@ -35,7 +39,7 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
 resource imagesContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
   parent: blobService
   name: imagesContainerName
-  properties: { publicAccess: 'Blob' }
+  properties: { publicAccess: 'None' }
 }
 
 // Job status + per-station progress, read by GET /api/jobs/{id}.
@@ -121,6 +125,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       functionAppScaleLimit: 10
       appSettings: [
         { name: 'AzureWebJobsStorage', value: storageConnection }
+        { name: 'API_KEY', value: apiKey }
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'dotnet-isolated' }
         { name: 'PUBLIC_URL_SCHEME', value: 'https' }

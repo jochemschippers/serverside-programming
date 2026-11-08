@@ -1,23 +1,29 @@
 ### Weather Images API
 # Works with the VS Code "REST Client" extension and Visual Studio / Rider .http support.
 # Flow: POST /api/jobs -> poll GET /api/jobs/{id} until status = "completed" -> open the image links.
+# The job endpoints need the API key in the x-api-key header. The key is shared separately, not in this repo.
 
 @baseUrl = https://weather-func-bqurxt3tu2lka.kindhill-bfd226d6.italynorth.azurecontainerapps.io
-# Local: func start in ./src
+@apiKey = PASTE_API_KEY_HERE
+# Local: func start in ./src (API_KEY in local.settings.json)
 # @baseUrl = http://localhost:7071
 
-### Health check
+### Health check (no key needed)
 GET {{baseUrl}}/api/Ping
 
 ### Start a new image job -> 202 Accepted { jobId, statusUrl }
 # @name startJob
 POST {{baseUrl}}/api/jobs
+x-api-key: {{apiKey}}
 
-### Job status: "queued" -> "processing" (imagesCompleted/stationCount) -> "completed" with public blob links in "images"
+### Job status: "queued" -> "processing" (imagesCompleted/stationCount) -> "completed" with image links in "images"
+# Image links are read-only SAS URLs valid for 24 hours; calling this again issues fresh ones.
 GET {{baseUrl}}/api/jobs/{{startJob.response.body.jobId}}
+x-api-key: {{apiKey}}
 
-### Fetch one generated image (copy a link from "images" above), e.g.
-# GET https://<storage-account>.blob.core.windows.net/images/<jobId>/<stationId>.jpg
+### Without the key -> 401
+POST {{baseUrl}}/api/jobs
 
 ### Unknown job id -> 404
 GET {{baseUrl}}/api/jobs/00000000000000000000000000000000
+x-api-key: {{apiKey}}

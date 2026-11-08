@@ -112,7 +112,7 @@ public class Workers(BlobServiceClient blobs, QueueServiceClient queues, TableSe
         var text = string.Join('\n',
             s.StationName,
             s.WeatherDescription ?? "",
-            $"Temp {N(s.Temperature, " Â°C")}  (feels {N(s.FeelTemperature, " Â°C")})",
+            $"Temp {N(s.Temperature, " °C")}  (feels {N(s.FeelTemperature, " °C")})",
             $"Wind {s.WindDirection} {N(s.WindSpeed, " m/s")}   Humidity {N(s.Humidity, "%")}   Rain {N(s.Precipitation, " mm/h")}",
             s.Timestamp is DateTime t ? $"Measured {t:dd-MM-yyyy HH:mm}" : "");
 

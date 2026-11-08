@@ -4,12 +4,14 @@ This Azure Functions app runs on Azure Container Apps. It fetches current weathe
 
 ## Use the API
 
-Open [api.http](api.http) in VS Code with the REST Client extension. The file is configured for the live deployment.
+Open [api.http](api.http) in VS Code with the REST Client extension. The file is configured for the live deployment. Set `@apiKey` to the API key (shared separately); the job endpoints return `401 Unauthorized` without a valid `x-api-key` header.
 
 1. Run `GET /api/Ping` to check that the API responds with `status: ok`.
 2. Run `POST /api/jobs` to start a job. The API returns `202 Accepted` with a `jobId` and a `statusUrl`.
-3. Run `GET /api/jobs/{id}` or open the returned `statusUrl`. Repeat until the status is `completed`.
+3. Run `GET /api/jobs/{id}` for the returned `statusUrl`. Repeat until the status is `completed`.
 4. Open any link in the `images` list to view the generated image.
+
+The `images` container is private. The status endpoint returns read-only SAS links that are valid for 24 hours; call it again for fresh links.
 
 Job status and progress are saved in the `jobs` table in Azure Table Storage: one row per job (status, station count, timestamps) and one row per finished station image (image URL). Each job processes up to 50 unique stations. The live feed returned 40 stations during verification, so that job produced 40 images.
 
@@ -24,4 +26,4 @@ $envId = az containerapp env show -g inh-ccd-lab2-js260904 -n inh-ccd-lab2-env-j
 .\deploy.ps1 -Location italynorth -ExistingEnvironmentId $envId
 ```
 
-For a new environment, run `.\deploy.ps1` and pass `-Location` if your subscription requires a different region. The script prints the health check URL when it finishes. If the hostname changed, update `@baseUrl` in `api.http`.
+For a new environment, run `.\deploy.ps1` and pass `-Location` if your subscription requires a different region. The script prints the health check URL and the API key when it finishes. The first deploy generates the key; later deploys reuse it. Pass `-ApiKey <value>` to set a new one. If the hostname changed, update `@baseUrl` in `api.http`.

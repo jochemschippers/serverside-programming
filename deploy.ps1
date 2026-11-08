@@ -5,7 +5,8 @@ param(
     [string]$ResourceGroup = 'rg-weatherimages',
     [string]$Location = 'swedencentral', # Azure for Students policy only allows a few EU regions
     [string]$Prefix = 'weather',
-    [string]$ExistingEnvironmentId = ''
+    [string]$ExistingEnvironmentId = '',
+    [string]$ApiKey = '' # optional: force a specific key, e.g. to rotate it
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,10 +32,26 @@ $groupExists = Invoke-Checked az group exists --name $ResourceGroup --output tsv
 if ($groupExists -eq 'false') {
     Invoke-Checked az group create --name $ResourceGroup --location $Location --output none
 }
+
+# API key: reuse the one already on the function app so shared keys keep working; generate one on first deploy.
+$apiKey = $ApiKey
+if (-not $apiKey) {
+    $existingApp = az resource list --resource-group $ResourceGroup --resource-type Microsoft.Web/sites --query '[0].name' --output tsv
+    if ($existingApp) {
+        $apiKey = az functionapp config appsettings list --resource-group $ResourceGroup --name $existingApp --query "[?name=='API_KEY'].value | [0]" --output tsv
+    }
+}
+if (-not $apiKey) {
+    $bytes = New-Object byte[] 24
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    $apiKey = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+    Write-Host 'Generated a new API key.'
+}
+
 $outputs = az deployment group create `
     --resource-group $ResourceGroup `
     --template-file (Join-Path $root 'main.bicep') `
-    --parameters prefix=$Prefix location=$Location existingEnvironmentId=$ExistingEnvironmentId `
+    --parameters prefix=$Prefix location=$Location existingEnvironmentId=$ExistingEnvironmentId apiKey=$apiKey `
     --query properties.outputs --output json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Bicep deployment failed' }
 
@@ -52,3 +69,4 @@ Write-Host '==> Point function app at new image'
 Invoke-Checked az functionapp config container set --resource-group $ResourceGroup --name $app --image $image --output none
 
 Write-Host "`nDeployed: $($outputs.functionAppUrl.value)/api/Ping"
+Write-Host "API key (send as x-api-key header): $apiKey"
