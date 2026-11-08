@@ -1,5 +1,6 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
+using Azure.Data.Tables;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Queues;
@@ -25,7 +26,7 @@ public record Station(
     double? Temperature, double? FeelTemperature, double? Humidity, double? WindSpeed, string? WindDirection,
     double? Precipitation);
 
-public class Workers(BlobServiceClient blobs, QueueServiceClient queues, HttpClient http, ILogger<Workers> log)
+public class Workers(BlobServiceClient blobs, QueueServiceClient queues, TableServiceClient tables, HttpClient http, ILogger<Workers> log)
 {
     public const int MaxStations = 50;
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -46,8 +47,12 @@ public class Workers(BlobServiceClient blobs, QueueServiceClient queues, HttpCli
         var stations = SelectStations(JsonNode.Parse(feed)!["actual"]!["stationmeasurements"]!.Deserialize<List<Station>>(Json)!);
         log.LogInformation("Job {JobId}: {Count} stations", jobId, stations.Count);
 
-        await blobs.GetBlobContainerClient(Names.JobsContainer).GetBlobClient($"{jobId}.json")
-            .UploadAsync(BinaryData.FromObjectAsJson(new JobManifest(DateTimeOffset.UtcNow, stations.Count)), overwrite: true);
+        // Merge keeps CreatedAt from the POST.
+        await tables.GetTableClient(Names.JobsTable).UpsertEntityAsync(new TableEntity(jobId, Names.JobRow)
+        {
+            ["Status"] = "processing",
+            ["StationCount"] = stations.Count,
+        }, TableUpdateMode.Merge);
 
         // Fan out: one message per station. A retry re-sends these; image paths are fixed, so no duplicate results.
         var imageQueue = queues.GetQueueClient(Names.ImageQueue);
@@ -68,9 +73,15 @@ public class Workers(BlobServiceClient blobs, QueueServiceClient queues, HttpCli
         using var jpeg = new MemoryStream();
         await image.SaveAsJpegAsync(jpeg, Jpeg);
         jpeg.Position = 0;
-        await blobs.GetBlobContainerClient(Names.ImagesContainer).GetBlobClient($"{jobId}/{station.StationId}.jpg")
-            .UploadAsync(jpeg, new BlobUploadOptions { HttpHeaders = new BlobHttpHeaders { ContentType = "image/jpeg" } });
-        // UploadAsync with options overwrites, so a retried message replaces the same blob.
+        var blob = blobs.GetBlobContainerClient(Names.ImagesContainer).GetBlobClient($"{jobId}/{station.StationId}.jpg");
+        await blob.UploadAsync(jpeg, new BlobUploadOptions { HttpHeaders = new BlobHttpHeaders { ContentType = "image/jpeg" } });
+
+        // Progress row per station. Retries overwrite the same blob and the same row, so nothing is counted twice.
+        await tables.GetTableClient(Names.JobsTable).UpsertEntityAsync(new TableEntity(jobId, station.StationId.ToString())
+        {
+            ["StationName"] = station.StationName,
+            ["ImageUrl"] = blob.Uri.ToString(),
+        }, TableUpdateMode.Replace);
     }
 
     async Task<Image<Rgba32>> LoadBackground(string seed)
@@ -101,7 +112,7 @@ public class Workers(BlobServiceClient blobs, QueueServiceClient queues, HttpCli
         var text = string.Join('\n',
             s.StationName,
             s.WeatherDescription ?? "",
-            $"Temp {N(s.Temperature, " °C")}  (feels {N(s.FeelTemperature, " °C")})",
+            $"Temp {N(s.Temperature, " Â°C")}  (feels {N(s.FeelTemperature, " Â°C")})",
             $"Wind {s.WindDirection} {N(s.WindSpeed, " m/s")}   Humidity {N(s.Humidity, "%")}   Rain {N(s.Precipitation, " mm/h")}",
             s.Timestamp is DateTime t ? $"Measured {t:dd-MM-yyyy HH:mm}" : "");
 

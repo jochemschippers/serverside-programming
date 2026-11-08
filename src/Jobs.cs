@@ -1,6 +1,5 @@
 using System.Text.Json;
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
+using Azure.Data.Tables;
 using Azure.Storage.Queues;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -14,22 +13,27 @@ public static class Names
     public const string StartQueue = "start-jobs";
     public const string ImageQueue = "image-jobs";
     public const string ImagesContainer = "images"; // public: images/{jobId}/{stationId}.jpg
-    public const string JobsContainer = "jobs";     // private: jobs/{jobId}.json
+    public const string JobsTable = "jobs";
+
+    // Table layout: PartitionKey = jobId.
+    //   RowKey "job"        -> Status, CreatedAt, StationCount
+    //   RowKey "{stationId}" -> StationName, ImageUrl (one row per finished image)
+    public const string JobRow = "job";
 }
 
-public record JobManifest(DateTimeOffset CreatedAt, int? StationCount);
-
-public class Jobs(BlobServiceClient blobs, QueueServiceClient queues)
+public class Jobs(TableServiceClient tables, QueueServiceClient queues)
 {
     [Function("StartJob")]
     public async Task<IActionResult> Start([HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "jobs")] HttpRequest req)
     {
         var jobId = Guid.NewGuid().ToString("N");
 
-        // Manifest first so GET can tell "queued" apart from "unknown id".
-        await blobs.GetBlobContainerClient(Names.JobsContainer)
-            .GetBlobClient($"{jobId}.json")
-            .UploadAsync(BinaryData.FromObjectAsJson(new JobManifest(DateTimeOffset.UtcNow, null)));
+        // Status row first so GET can tell "queued" apart from "unknown id".
+        await tables.GetTableClient(Names.JobsTable).AddEntityAsync(new TableEntity(jobId, Names.JobRow)
+        {
+            ["Status"] = "queued",
+            ["CreatedAt"] = DateTimeOffset.UtcNow,
+        });
         await queues.GetQueueClient(Names.StartQueue)
             .SendMessageAsync(JsonSerializer.Serialize(new StartMessage(jobId)));
 
@@ -42,29 +46,33 @@ public class Jobs(BlobServiceClient blobs, QueueServiceClient queues)
     [Function("GetJob")]
     public async Task<IActionResult> Get([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "jobs/{id}")] HttpRequest req, string id)
     {
-        if (!Guid.TryParseExact(id, "N", out _)) return new NotFoundResult();
+        if (!Guid.TryParseExact(id, "N", out _)) return new NotFoundResult(); // also keeps the filter below injection-free
 
-        var manifestBlob = blobs.GetBlobContainerClient(Names.JobsContainer).GetBlobClient($"{id}.json");
-        if (!await manifestBlob.ExistsAsync()) return new NotFoundResult();
-        var manifest = (await manifestBlob.DownloadContentAsync()).Value.Content.ToObjectFromJson<JobManifest>()!;
+        var table = tables.GetTableClient(Names.JobsTable);
+        TableEntity? job = null;
+        var images = new List<TableEntity>();
+        await foreach (var row in table.QueryAsync<TableEntity>(e => e.PartitionKey == id))
+        {
+            if (row.RowKey == Names.JobRow) job = row; else images.Add(row);
+        }
+        if (job is null) return new NotFoundResult();
 
-        if (manifest.StationCount is not int total)
-            return new OkObjectResult(new { jobId = id, status = "queued", manifest.CreatedAt });
+        var total = job.GetInt32("StationCount");
+        var done = total is int t && images.Count >= t;
+        var status = done ? "completed" : job.GetString("Status");
 
-        var images = blobs.GetBlobContainerClient(Names.ImagesContainer);
-        var urls = new List<string>();
-        await foreach (var blob in images.GetBlobsAsync(BlobTraits.None, BlobStates.None, $"{id}/", default))
-            urls.Add(images.GetBlobClient(blob.Name).Uri.ToString());
+        // Persist the final state once, so the table itself shows completed jobs.
+        if (done && job.GetString("Status") != "completed")
+            await table.UpdateEntityAsync(new TableEntity(id, Names.JobRow) { ["Status"] = "completed", ["CompletedAt"] = DateTimeOffset.UtcNow }, Azure.ETag.All, TableUpdateMode.Merge);
 
-        var done = urls.Count >= total;
         return new OkObjectResult(new
         {
             jobId = id,
-            status = done ? "completed" : "processing",
-            manifest.CreatedAt,
+            status,
+            createdAt = job.GetDateTimeOffset("CreatedAt"),
             stationCount = total,
-            imagesCompleted = urls.Count,
-            images = done ? urls : null,
+            imagesCompleted = images.Count,
+            images = done ? images.Select(r => r.GetString("ImageUrl")) : null,
         });
     }
 }

@@ -11,7 +11,7 @@ Open [api.http](api.http) in VS Code with the REST Client extension. The file is
 3. Run `GET /api/jobs/{id}` or open the returned `statusUrl`. Repeat until the status is `completed`.
 4. Open any link in the `images` list to view the generated image.
 
-Each job processes up to 50 unique stations. The live feed returned 40 stations during verification, so that job produced 40 images.
+Job status and progress are saved in the `jobs` table in Azure Table Storage: one row per job (status, station count, timestamps) and one row per finished station image (image URL). Each job processes up to 50 unique stations. The live feed returned 40 stations during verification, so that job produced 40 images.
 
 ## Deploy to Azure
 

@@ -1,4 +1,4 @@
-@description('Short lowercase prefix for resource names.')
+﻿@description('Short lowercase prefix for resource names.')
 param prefix string = 'weather'
 param location string = resourceGroup().location
 
@@ -12,7 +12,7 @@ var suffix = uniqueString(resourceGroup().id)
 var startQueueName = 'start-jobs'
 var imageQueueName = 'image-jobs'
 var imagesContainerName = 'images'
-var jobsContainerName = 'jobs' // names mirrored in src/Jobs.cs (Names)
+var jobsTableName = 'jobs' // names mirrored in src/Jobs.cs (Names)
 
 // ---------- Storage: blobs + queues ----------
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
@@ -38,11 +38,15 @@ resource imagesContainer 'Microsoft.Storage/storageAccounts/blobServices/contain
   properties: { publicAccess: 'Blob' }
 }
 
-// Private: per-job manifest (created time + station count) used by GET /api/jobs/{id}.
-resource jobsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
-  parent: blobService
-  name: jobsContainerName
-  properties: { publicAccess: 'None' }
+// Job status + per-station progress, read by GET /api/jobs/{id}.
+resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = {
+  parent: storage
+  name: 'default'
+}
+
+resource jobsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = {
+  parent: tableService
+  name: jobsTableName
 }
 
 resource queueService 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = {
@@ -126,7 +130,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       ]
     }
   }
-  dependsOn: [startQueue, imageQueue, imagesContainer, jobsContainer]
+  dependsOn: [startQueue, imageQueue, imagesContainer, jobsTable]
 }
 
 output functionAppName string = functionApp.name
